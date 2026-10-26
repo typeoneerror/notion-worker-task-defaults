@@ -9,6 +9,7 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
+    "types": ["node"],
     "moduleResolution": "nodenext"
   },
   "include": ["src/**/*"],
