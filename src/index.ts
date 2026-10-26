@@ -46,7 +46,7 @@ async function createTask(
   title: string,
   projectId: string,
   icon: CreatePageParameters['icon'] = null,
-  owners: { id: string }[] = [],
+  assignees: { id: string }[] = [],
   date: DateRange | null = null
 ): Promise<CreatePageResponse> {
   const dataSourceId = process.env.TASKS_DATA_SOURCE_ID;
@@ -76,7 +76,7 @@ async function createTask(
     properties: {
       [titleProperty]: { title: [{ text: { content: title } }] },
       [projectProperty]: { relation: [{ id: projectId }] },
-      [assigneeProperty]: { people: owners.map(({ id }) => ({ id })) },
+      [assigneeProperty]: { people: assignees.map(({ id }) => ({ id })) },
       ...(date && { [dateProperty]: { date } }),
     },
     template,
@@ -162,8 +162,8 @@ async function createDefaultTasks(
     }
     const title = titleProperty.title.map((t) => t.plain_text).join('');
 
-    const ownerProperty = task.properties[process.env.TASKS_PROPERTY_ASSIGNEE || 'Owner'];
-    const owners = ownerProperty?.type === 'people' ? ownerProperty.people : [];
+    const assigneeProperty = task.properties[process.env.TASKS_PROPERTY_ASSIGNEE || 'Assignee'];
+    const assignees = assigneeProperty?.type === 'people' ? assigneeProperty.people : [];
 
     // Uploaded file icons use expiring URLs and can't be copied
     const icon = task.icon?.type === 'file' ? null : task.icon;
@@ -174,7 +174,15 @@ async function createDefaultTasks(
     const dateRange = dateRangeProperty?.type === 'number' ? (dateRangeProperty.number ?? 1) : 1;
     const date = getDateRange(baseDate, dateOffset, dateRange);
 
-    const page = await createTask(notion, titleProperty.id, title, project.id, icon, owners, date);
+    const page = await createTask(
+      notion,
+      titleProperty.id,
+      title,
+      project.id,
+      icon,
+      assignees,
+      date
+    );
     createdTasks.push({ id: page.id, title, date });
   }
 
