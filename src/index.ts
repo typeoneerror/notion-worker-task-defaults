@@ -77,11 +77,13 @@ async function createTask(
   return task.id;
 }
 
+type CreatedTask = { id: string; title: string };
+
 async function createDefaultTasks(
   notion: CapabilityContext['notion'],
   projectId: string,
   templateId: string | null = null
-) {
+): Promise<CreatedTask[]> {
   console.log(`createDefaultTasks for project ${projectId} with templateId ${templateId}`);
 
   // First fetch the project page
@@ -118,6 +120,7 @@ async function createDefaultTasks(
   const tasks = await Promise.all(taskIds.map((page_id) => notion.pages.retrieve({ page_id })));
 
   // Create a task in the project for each default, in order
+  const createdTasks: CreatedTask[] = [];
   for (const task of tasks) {
     if (!isFullPage(task)) {
       throw new Error(`Default task ${task.id} did not include properties`);
@@ -135,8 +138,11 @@ async function createDefaultTasks(
     // Uploaded file icons use expiring URLs and can't be copied
     const icon = task.icon?.type === 'file' ? null : task.icon;
 
-    await createTask(notion, titleProperty.id, title, project.id, icon, owners);
+    const id = await createTask(notion, titleProperty.id, title, project.id, icon, owners);
+    createdTasks.push({ id, title });
   }
+
+  return createdTasks;
 }
 
 worker.tool('createDefaultTasks', {
@@ -146,9 +152,17 @@ worker.tool('createDefaultTasks', {
     projectId: j.uuid().describe('The ID of the project to add default tasks to'),
     templateId: j.uuid().describe('The ID of the task template to apply').nullable(),
   }),
+  outputSchema: j.object({
+    tasks: j.array(
+      j.object({
+        id: j.string().describe('The ID of the created task'),
+        title: j.string().describe('The title of the created task'),
+      })
+    ),
+  }),
   execute: async ({ projectId, templateId }, { notion }) => {
-    await createDefaultTasks(notion, projectId, templateId);
+    const tasks = await createDefaultTasks(notion, projectId, templateId);
 
-    return `Started created default tasks for projectId ${projectId} with templateId ${templateId}`;
+    return { tasks };
   },
 });
