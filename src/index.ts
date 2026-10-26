@@ -96,12 +96,20 @@ async function createDefaultTasks(
   const templatePropertyName = process.env.PROJECTS_PROPERTY_TEMPLATE || 'Template';
   if (!templateId) {
     const templateRelation = project.properties[templatePropertyName];
-    if (templateRelation?.type !== 'relation' || templateRelation.relation.length !== 1) {
-      throw new Error(`Project ${projectId} must have one related page in ${templatePropertyName}`);
+    const relatedTemplates = templateRelation?.type === 'relation' ? templateRelation.relation : [];
+    if (relatedTemplates.length > 1) {
+      throw new Error(
+        `Project ${projectId} has more than one related page in ${templatePropertyName}`
+      );
     }
 
-    // Load the template page
-    templateId = templateRelation.relation[0].id;
+    // Fall back to the default template if the project doesn't have one
+    templateId = relatedTemplates[0]?.id ?? process.env.DEFAULT_TASK_TEMPLATE_ID;
+    if (!templateId) {
+      throw new Error(
+        `Project ${projectId} has no ${templatePropertyName} and DEFAULT_TASK_TEMPLATE_ID is not configured`
+      );
+    }
   }
 
   console.log(`Loading template with id ${templateId}`);
