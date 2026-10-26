@@ -6,7 +6,7 @@
   "scripts": {
     "build": "tsc",
     "check": "tsc --noEmit",
-    "local": "ntn workers exec createDefaultTasks --local -d '{\"projectId\": \"4051c1cc-e3f3-8073-a8b7-e4ef77d87658\", \"templateId\": null}'"
+    "local": "ntn workers exec createDefaultTasks --local -d '{\"projectId\": \"4051c1cc-e3f3-8073-a8b7-e4ef77d87658\", \"templateId\": \"4051c1cc-e3f3-8019-8189-c9cbe7d2082b\"}'"
   },
   "engines": {
     "node": ">=22.0.0",

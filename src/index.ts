@@ -103,6 +103,9 @@ async function createDefaultTasks(
     // Load the template page
     templateId = templateRelation.relation[0].id;
   }
+
+  console.log(`Loading template with id ${templateId}`);
+
   const template = await notion.pages.retrieve({ page_id: templateId });
   if (!isFullPage(template)) {
     throw new Error(`Template ${templateId} did not include properties`);
@@ -119,7 +122,9 @@ async function createDefaultTasks(
   const taskIds = await getRelationIds(notion, templateId, defaultsProperty.id);
   const tasks = await Promise.all(taskIds.map((page_id) => notion.pages.retrieve({ page_id })));
 
-  // Create a task in the project for each default, in order
+  console.log(`${tasks.length} defaults found`);
+
+  // Create a task in the project for each default
   const createdTasks: CreatedTask[] = [];
   for (const task of tasks) {
     if (!isFullPage(task)) {
