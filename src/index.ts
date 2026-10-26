@@ -1,13 +1,20 @@
-import { Worker, WebhookVerificationError, type CapabilityContext } from '@notionhq/workers';
+import { Worker, type CapabilityContext } from '@notionhq/workers';
 import { j } from '@notionhq/workers/schema-builder';
+import { isFullPage, type CreatePageParameters } from '@notionhq/client';
+import { getRelationIds, verifyWebhookSecret } from './utils.js';
 
 const worker = new Worker();
 export default worker;
 
-function verifyWebhookSecret(headers: Record<string, string>, secret: string | undefined): void {
-  if (!secret || headers['x-load-default-tasks-secret'] !== secret) {
-    throw new WebhookVerificationError('Invalid webhook secret');
+function parseLoadDefaultTasksPayload(body: Record<string, unknown>): { projectId: string } {
+  const data = body.data as Record<string, unknown> | undefined;
+  const projectId = data?.id;
+
+  if (typeof projectId !== 'string' || !projectId.trim()) {
+    throw new Error('Webhook body must include a project identifier as "id"');
   }
+
+  return { projectId };
 }
 
 worker.webhook('loadDefaultTasks', {
@@ -19,54 +26,34 @@ worker.webhook('loadDefaultTasks', {
       verifyWebhookSecret(event.headers, process.env.LOAD_DEFAULT_TASKS_WEBHOOK_SECRET);
 
       // Parse the payload from Notion
-      const { projectId, template } = parseLoadDefaultTasksPayload(event.body);
+      const { projectId } = parseLoadDefaultTasksPayload(event.body);
 
       // Start creating the default tasks based on a template name
-      await createDefaultTasks(notion, projectId, template);
+      await createDefaultTasks(notion, projectId);
     }
   },
 });
 
-function parseLoadDefaultTasksPayload(body: Record<string, unknown>): {
-  projectId: string;
-  template: string | null;
-} {
-  const data = body.data;
-  const payload =
-    data && typeof data === 'object' && !Array.isArray(data)
-      ? (data as Record<string, unknown>)
-      : undefined;
-
-  const projectId = payload?.id;
-  const template = payload?.template ?? null;
-
-  if (typeof projectId !== 'string' || !projectId.trim()) {
-    throw new Error('Webhook body must include a project identifier as "id"');
-  }
-
-  if (template !== null && typeof template !== 'string') {
-    throw new Error('Webhook body template must be a string or null');
-  }
-
-  return { projectId, template };
-}
-
 async function createTask(
   notion: CapabilityContext['notion'],
-  name: string,
-  projectId: string
+  titleProperty: string,
+  title: string,
+  projectId: string,
+  icon: CreatePageParameters['icon'] = null,
+  owners: { id: string }[] = []
 ): Promise<string> {
   const dataSourceId = process.env.TASKS_DATA_SOURCE_ID;
   if (!dataSourceId) {
     throw new Error('TASKS_DATA_SOURCE_ID is not configured');
   }
 
-  const nameProperty = process.env.TASKS_NAME_PROPERTY || 'Name';
-  const templateId: string = process.env.TASKS_TEMPLATE_ID || 'none';
+  const projectProperty = process.env.TASKS_PROPERTY_PROJECT || 'Project';
+  const assigneeProperty = process.env.TASKS_PROPERTY_ASSIGNEE || 'Assignee';
 
   // template[type]=none (default behavior) doesn't use a template
   // template[type]=default uses the default template
   // template[type]=template_id; template[template_id]=... uses the provided template id
+  const templateId: string = process.env.TASKS_TEMPLATE_ID || 'none';
   const template =
     templateId === 'none'
       ? { type: 'none' as const }
@@ -74,13 +61,17 @@ async function createTask(
         ? { type: 'default' as const }
         : { type: 'template_id' as const, template_id: templateId };
 
+  console.log(`Creating task "${title}" with template ${templateId}`);
+
   const task = await notion.pages.create({
     parent: { type: 'data_source_id', data_source_id: dataSourceId },
     properties: {
-      [nameProperty]: { title: [{ text: { content: name } }] },
-      Project: { relation: [{ id: projectId }] },
+      [titleProperty]: { title: [{ text: { content: title } }] },
+      [projectProperty]: { relation: [{ id: projectId }] },
+      [assigneeProperty]: { people: owners.map(({ id }) => ({ id })) },
     },
     template,
+    icon,
   });
 
   return task.id;
@@ -89,11 +80,63 @@ async function createTask(
 async function createDefaultTasks(
   notion: CapabilityContext['notion'],
   projectId: string,
-  template: string | null = null
+  templateId: string | null = null
 ) {
-  console.log(`createDefaultTasks for project ${projectId} with template ${template}`);
+  console.log(`createDefaultTasks for project ${projectId} with templateId ${templateId}`);
 
-  await createTask(notion, 'Task Default', projectId);
+  // First fetch the project page
+  const project = await notion.pages.retrieve({ page_id: projectId });
+  if (!isFullPage(project)) {
+    throw new Error(`Project ${projectId} did not include properties`);
+  }
+
+  // Then we need to fetch the template the project is set to load
+  if (!templateId) {
+    const templatePropertyName = process.env.PROJECTS_PROPERTY_TEMPLATE || 'Template';
+    const templateRelation = project.properties[templatePropertyName];
+    if (templateRelation?.type !== 'relation' || templateRelation.relation.length !== 1) {
+      throw new Error(`Project ${projectId} must have one related page in ${templatePropertyName}`);
+    }
+
+    // Load the template page
+    templateId = templateRelation.relation[0].id;
+  }
+  const template = await notion.pages.retrieve({ page_id: templateId });
+  if (!isFullPage(template)) {
+    throw new Error(`Template ${templateId} did not include properties`);
+  }
+
+  // Finally load the defaults associated with the template
+  const defaultsPropertyName = process.env.TEMPLATE_DEFAULTS_PROPERTY || 'Defaults';
+  const defaultsProperty = template.properties[defaultsPropertyName];
+  if (defaultsProperty?.type !== 'relation') {
+    throw new Error(`Template ${templateId} must have a relation property ${defaultsPropertyName}`);
+  }
+
+  // Because you can only load 25 relations at once, we have to load them until there's none left...
+  const taskIds = await getRelationIds(notion, templateId, defaultsProperty.id);
+  const tasks = await Promise.all(taskIds.map((page_id) => notion.pages.retrieve({ page_id })));
+
+  // Create a task in the project for each default, in order
+  for (const task of tasks) {
+    if (!isFullPage(task)) {
+      throw new Error(`Default task ${task.id} did not include properties`);
+    }
+
+    const titleProperty = Object.values(task.properties).find((p) => p.type === 'title');
+    if (titleProperty?.type !== 'title') {
+      throw new Error('Default task database does not seem to have a title property.');
+    }
+    const title = titleProperty.title.map((t) => t.plain_text).join('');
+
+    const ownerProperty = task.properties[process.env.TASKS_PROPERTY_ASSIGNEE || 'Owner'];
+    const owners = ownerProperty?.type === 'people' ? ownerProperty.people : [];
+
+    // Uploaded file icons use expiring URLs and can't be copied
+    const icon = task.icon?.type === 'file' ? null : task.icon;
+
+    await createTask(notion, titleProperty.id, title, project.id, icon, owners);
+  }
 }
 
 worker.tool('createDefaultTasks', {
@@ -101,11 +144,11 @@ worker.tool('createDefaultTasks', {
   description: 'Loads the default tasks for a project given a project and a template name.',
   schema: j.object({
     projectId: j.uuid().describe('The ID of the project to add default tasks to'),
-    template: j.string().describe('Name of the template to apply').nullable(),
+    templateId: j.uuid().describe('The ID of the task template to apply').nullable(),
   }),
-  execute: async ({ projectId, template }, { notion }) => {
-    await createDefaultTasks(notion, projectId, template);
+  execute: async ({ projectId, templateId }, { notion }) => {
+    await createDefaultTasks(notion, projectId, templateId);
 
-    return `Started created default tasks for projectId ${projectId} with template ${template}`;
+    return `Started created default tasks for projectId ${projectId} with templateId ${templateId}`;
   },
 });
