@@ -1,4 +1,6 @@
 import { WebhookVerificationError, type CapabilityContext } from '@notionhq/workers';
+import { addDays, format, parseISO } from 'date-fns';
+import { formatInTimeZone } from 'date-fns-tz';
 
 const HEADER = 'x-load-default-tasks-secret';
 
@@ -40,4 +42,26 @@ export async function getRelationIds(
   } while (cursor);
 
   return ids;
+}
+
+export type DateRange = { start: string; end: string | null };
+
+// The yyyy-MM-dd date of a Notion date value in the given timezone, or today if there isn't one
+export function getCalendarDate(timeZone: string, value?: string | null): string {
+  if (value && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return value;
+  }
+
+  return formatInTimeZone(value ? new Date(value) : new Date(), timeZone, 'yyyy-MM-dd');
+}
+
+// Starts `offset` days after the base date and spans `range` days, including the start day
+export function getDateRange(baseDate: string, offset: number, range: number): DateRange {
+  const start = addDays(parseISO(baseDate), offset);
+  const end = range > 1 ? addDays(start, range - 1) : null;
+
+  return {
+    start: format(start, 'yyyy-MM-dd'),
+    end: end ? format(end, 'yyyy-MM-dd') : null,
+  };
 }

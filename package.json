@@ -19,6 +19,8 @@
   },
   "dependencies": {
     "@notionhq/client": "^5.28.0",
-    "@notionhq/workers": ">=0.0.0"
+    "@notionhq/workers": ">=0.0.0",
+    "date-fns": "^4.4.0",
+    "date-fns-tz": "^3.2.0"
   }
 }

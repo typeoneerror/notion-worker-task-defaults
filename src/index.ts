@@ -1,7 +1,13 @@
 import { Worker, type CapabilityContext } from '@notionhq/workers';
 import { j } from '@notionhq/workers/schema-builder';
-import { isFullPage, type CreatePageParameters } from '@notionhq/client';
-import { getRelationIds, verifyWebhookSecret } from './utils.js';
+import { CreatePageResponse, isFullPage, type CreatePageParameters } from '@notionhq/client';
+import {
+  getCalendarDate,
+  getDateRange,
+  getRelationIds,
+  verifyWebhookSecret,
+  type DateRange,
+} from './utils.js';
 
 const worker = new Worker();
 export default worker;
@@ -40,8 +46,9 @@ async function createTask(
   title: string,
   projectId: string,
   icon: CreatePageParameters['icon'] = null,
-  owners: { id: string }[] = []
-): Promise<string> {
+  owners: { id: string }[] = [],
+  date: DateRange | null = null
+): Promise<CreatePageResponse> {
   const dataSourceId = process.env.TASKS_DATA_SOURCE_ID;
   if (!dataSourceId) {
     throw new Error('TASKS_DATA_SOURCE_ID is not configured');
@@ -49,6 +56,7 @@ async function createTask(
 
   const projectProperty = process.env.TASKS_PROPERTY_PROJECT || 'Project';
   const assigneeProperty = process.env.TASKS_PROPERTY_ASSIGNEE || 'Assignee';
+  const dateProperty = process.env.TASKS_PROPERTY_DATE || 'Date';
 
   // template[type]=none (default behavior) doesn't use a template
   // template[type]=default uses the default template
@@ -63,21 +71,20 @@ async function createTask(
 
   console.log(`Creating task "${title}" with template ${templateId}`);
 
-  const task = await notion.pages.create({
+  return await notion.pages.create({
     parent: { type: 'data_source_id', data_source_id: dataSourceId },
     properties: {
       [titleProperty]: { title: [{ text: { content: title } }] },
       [projectProperty]: { relation: [{ id: projectId }] },
       [assigneeProperty]: { people: owners.map(({ id }) => ({ id })) },
+      ...(date && { [dateProperty]: { date } }),
     },
     template,
     icon,
   });
-
-  return task.id;
 }
 
-type CreatedTask = { id: string; title: string };
+type CreatedTask = { id: string; title: string; date: DateRange };
 
 async function createDefaultTasks(
   notion: CapabilityContext['notion'],
@@ -120,7 +127,7 @@ async function createDefaultTasks(
   }
 
   // Finally load the defaults associated with the template
-  const defaultsPropertyName = process.env.TEMPLATE_DEFAULTS_PROPERTY || 'Defaults';
+  const defaultsPropertyName = process.env.PROJECTS_PROPERTY_DEFAULTS || 'Defaults';
   const defaultsProperty = template.properties[defaultsPropertyName];
   if (defaultsProperty?.type !== 'relation') {
     throw new Error(`Template ${templateId} must have a relation property ${defaultsPropertyName}`);
@@ -131,6 +138,16 @@ async function createDefaultTasks(
   const tasks = await Promise.all(taskIds.map((page_id) => notion.pages.retrieve({ page_id })));
 
   console.log(`${tasks.length} defaults found`);
+
+  // Task dates are offset from the project's date, or today if it doesn't have one
+  const timeZone = process.env.TIMEZONE || 'UTC';
+  const projectDateProperty = project.properties[process.env.PROJECTS_PROPERTY_DATE || 'Date'];
+  const baseDate = getCalendarDate(
+    timeZone,
+    projectDateProperty?.type === 'date' ? projectDateProperty.date?.start : null
+  );
+  const dateOffsetPropertyName = process.env.DEFAULTS_PROPERTY_DATE_OFFSET || 'Date Offset';
+  const dateRangePropertyName = process.env.DEFAULTS_PROPERTY_DATE_RANGE || 'Date Range';
 
   // Create a task in the project for each default
   const createdTasks: CreatedTask[] = [];
@@ -151,8 +168,14 @@ async function createDefaultTasks(
     // Uploaded file icons use expiring URLs and can't be copied
     const icon = task.icon?.type === 'file' ? null : task.icon;
 
-    const id = await createTask(notion, titleProperty.id, title, project.id, icon, owners);
-    createdTasks.push({ id, title });
+    const dateOffsetProperty = task.properties[dateOffsetPropertyName];
+    const dateRangeProperty = task.properties[dateRangePropertyName];
+    const dateOffset = dateOffsetProperty?.type === 'number' ? (dateOffsetProperty.number ?? 0) : 0;
+    const dateRange = dateRangeProperty?.type === 'number' ? (dateRangeProperty.number ?? 1) : 1;
+    const date = getDateRange(baseDate, dateOffset, dateRange);
+
+    const page = await createTask(notion, titleProperty.id, title, project.id, icon, owners, date);
+    createdTasks.push({ id: page.id, title, date });
   }
 
   // Clear the template from the project now that its defaults have been created
@@ -178,6 +201,12 @@ worker.tool('createDefaultTasks', {
       j.object({
         id: j.string().describe('The ID of the created task'),
         title: j.string().describe('The title of the created task'),
+        date: j
+          .object({
+            start: j.string().describe('The start date of the task (yyyy-MM-dd)'),
+            end: j.string().describe('The end date of the task (yyyy-MM-dd)').nullable(),
+          })
+          .describe('The date of the created task'),
       })
     ),
   }),
