@@ -93,8 +93,8 @@ async function createDefaultTasks(
   }
 
   // Then we need to fetch the template the project is set to load
+  const templatePropertyName = process.env.PROJECTS_PROPERTY_TEMPLATE || 'Template';
   if (!templateId) {
-    const templatePropertyName = process.env.PROJECTS_PROPERTY_TEMPLATE || 'Template';
     const templateRelation = project.properties[templatePropertyName];
     if (templateRelation?.type !== 'relation' || templateRelation.relation.length !== 1) {
       throw new Error(`Project ${projectId} must have one related page in ${templatePropertyName}`);
@@ -141,6 +141,14 @@ async function createDefaultTasks(
     const id = await createTask(notion, titleProperty.id, title, project.id, icon, owners);
     createdTasks.push({ id, title });
   }
+
+  // Clear the template from the project now that its defaults have been created
+  await notion.pages.update({
+    page_id: project.id,
+    properties: {
+      [templatePropertyName]: { relation: [] },
+    },
+  });
 
   return createdTasks;
 }
