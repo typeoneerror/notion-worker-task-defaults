@@ -1,4 +1,5 @@
-import { WebhookVerificationError, type CapabilityContext } from '@notionhq/workers';
+import { Client } from '@notionhq/client';
+import { WebhookVerificationError } from '@notionhq/workers';
 import { addDays, format, parseISO } from 'date-fns';
 import { formatInTimeZone } from 'date-fns-tz';
 
@@ -15,7 +16,7 @@ export function verifyWebhookSecret(
 
 // pages.retrieve truncates relations at 25 items, so page through the property endpoint
 export async function getRelationIds(
-  notion: CapabilityContext['notion'],
+  notion: Client,
   pageId: string,
   propertyId: string
 ): Promise<string[]> {

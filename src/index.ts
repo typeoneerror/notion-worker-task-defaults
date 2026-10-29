@@ -50,6 +50,7 @@ async function createTask(
   titleProperty: string,
   title: string,
   projectId: string,
+  // FIXME: this could be PageIconRequest if exported
   icon: CreatePageParameters['icon'] = null,
   assignees: { id: string }[] = [],
   date: DateRange | null = null
