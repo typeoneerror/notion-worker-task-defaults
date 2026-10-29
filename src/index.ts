@@ -1,6 +1,11 @@
-import { Worker, type CapabilityContext } from '@notionhq/workers';
+import { Worker } from '@notionhq/workers';
 import { j } from '@notionhq/workers/schema-builder';
-import { CreatePageResponse, isFullPage, type CreatePageParameters } from '@notionhq/client';
+import {
+  Client,
+  CreatePageResponse,
+  isFullPage,
+  type CreatePageParameters,
+} from '@notionhq/client';
 import {
   getCalendarDate,
   getDateRange,
@@ -41,7 +46,7 @@ worker.webhook('loadDefaultTasks', {
 });
 
 async function createTask(
-  notion: CapabilityContext['notion'],
+  notion: Client,
   titleProperty: string,
   title: string,
   projectId: string,
@@ -87,7 +92,7 @@ async function createTask(
 type CreatedTask = { id: string; title: string; date: DateRange };
 
 async function createDefaultTasks(
-  notion: CapabilityContext['notion'],
+  notion: Client,
   projectId: string,
   templateId: string | null = null
 ): Promise<CreatedTask[]> {
