@@ -2,28 +2,28 @@
 
 A [Notion Worker](https://developers.notion.com/workers/get-started/overview.md) that fills a project with a set of default tasks.
 
-Each project points at a **template** page. The template has a relation to a list of **default** tasks. When the worker runs for a project, it creates one task per default, copying the default's title, icon, and owners, and dating each task relative to the project's date. Afterwards it clears the template from the project so it doesn't run twice.
+Each **project** points at a **template** page. The template has a relation to a list of **default** tasks. When the worker runs for a project, it creates one task per default, copying the default's title, icon, and owners, and dating each task relative to the project's date. Afterwards it clears the template from the project so it doesn't run twice.
 
 The worker exposes two capabilities:
 
 - `loadDefaultTasks` — a webhook, meant to be called from a Notion automation (either a database automation or from a button property) on the Projects database.
-- `createDefaultTasks` — a tool that Custom Agents (or you, via `ntn workers exec`) can call with a `projectId` and an optional `templateId`. It returns the tasks it created.
+- `createDefaultTasks` — a tool that Custom Agents (or you, via `ntn workers exec`) can call with a `projectId` and an optional `templateId`. It returns the tasks it created. Uses a separate authorization using an Agent's context rather than the one used by all other contexts.
 
 ## How it works
 
-1. Load the project page.
-2. Pick the template: the `templateId` passed to the tool, otherwise the single page in the project's `Template` relation, otherwise `DEFAULT_TASK_TEMPLATE_ID`, otherwise the oldest template with `Default?` checked.
-3. Load every page in the template's `Defaults` relation.
+1. Loads the project page.
+2. Picks the template to apply: the `templateId` passed to the tool, otherwise the single page in the project's `Template` relation, otherwise `TEMPLATES_DEFAULT_ID`, otherwise the oldest template with `Default?` checked.
+3. Loads every page in the template's `Defaults` relation.
 4. For each default, create a task in the Tasks data source with:
    - the default's title and icon (uploaded image icons can't be copied and are skipped),
-   - the default's owners as the task's assignees,
+   - the default's owners as the task's assignees (or the person who triggered the automation if blank),
    - a relation back to the project,
    - a date that starts `Date Offset` days after the project's `Date` and spans `Date Range` days (including the start day). If the project has no date, today is used.
 5. Clear the project's `Template` relation.
 
 ## Requirements
 
-- Node.js 22 or later and npm 10.9.2 or later
+- Node.js 22 or later and npm 10.9.2 or later (pinned to 26 via .nvmrc)
 - The `ntn` CLI, logged in to your workspace with `ntn login`
 - Three Notion databases:
   - **Projects** with a `Template` relation (to Templates) and a `Date` date property
@@ -54,18 +54,21 @@ The webhook isn't called by a Custom Agent, so it needs its own API token.
 For local runs, put the variables in a `.env` file in the project root:
 
 ```shell
+LOAD_DEFAULT_TASKS_WEBHOOK_SECRET=some-long-random-string
 NOTION_API_TOKEN=secret_...
 TASKS_DATA_SOURCE_ID=...
-LOAD_DEFAULT_TASKS_WEBHOOK_SECRET=some-long-random-string
-DEFAULT_TASK_TEMPLATE_ID=...
-TIMEZONE=America/New_York
+```
+
+You can set that "some-long-random-string" with the following:
+
+```shell
+openssl rand -hex 32
 ```
 
 `.env` is loaded automatically by `ntn workers exec --local`. The deployed worker doesn't read it, so set the values remotely with `ntn`. Either set them one at a time:
 
 ```shell
 ntn workers env set TASKS_DATA_SOURCE_ID=your-data-source-id
-ntn workers env set TEMPLATES_DATA_SOURCE_ID=your-data-source-id
 ```
 
 or push the whole `.env` file at once:
@@ -95,12 +98,12 @@ ntn workers webhooks list
 
 ### 5. Call the webhook from Notion
 
-On the Projects database, add an automation (for example, "when Template is edited") with a **Send webhook** action:
+On the Projects database, add an automation (for example, on a button) with a **Send webhook** action:
 
 - **URL:** the `loadDefaultTasks` URL from `ntn workers webhooks list`
 - **Header:** `x-load-default-tasks-secret` set to the same value as `LOAD_DEFAULT_TASKS_WEBHOOK_SECRET`
 
-The worker rejects any request without that header. (Note this is horribly insecure as Notion stores headers in Webhook steps in plain text.)
+The worker rejects any request without that header. (Note this is "horribly" insecure as Notion stores headers in Webhook steps in plain text.)
 
 ## Running the tool
 
@@ -110,7 +113,7 @@ Run the tool locally against a project (this creates real tasks):
 ntn workers exec createDefaultTasks --local -d '{"projectId": "<project-page-id>", "templateId": null}'
 ```
 
-Leave off `--local` to run it on the deployed worker. The tool returns the created tasks:
+Leave off `--local` to run it on the deployed worker. The tool returns the created tasks following the `outputSchema`:
 
 ```json
 {
@@ -134,15 +137,18 @@ Leave off `--local` to run it on the deployed worker. The tool returns the creat
 - `TASKS_DATA_SOURCE_ID` — data source ID of the Tasks database that new tasks are created in. If you only have the database ID, run `ntn datasources resolve <database-id>`.
 - `LOAD_DEFAULT_TASKS_WEBHOOK_SECRET` — shared secret that must be sent in the `x-load-default-tasks-secret` header when calling the webhook.
 
-### Templates
+### Templates database
 
-- `DEFAULT_TASK_TEMPLATE_ID` — template page to use when no `templateId` is passed and the project has no template.
-- `TEMPLATES_DATA_SOURCE_ID` — data source ID of the Templates database. If `DEFAULT_TASK_TEMPLATE_ID` isn't set, the oldest template with `Default?` checked is used. If neither finds a template, those projects fail with an error.
-- `TASKS_TEMPLATE_ID` — Notion page template applied to each new task. `none` (default) uses no template, `default` uses the Tasks database's default template, or set a template page ID.
+- `TEMPLATES_DEFAULT_ID` — template page to use when no `templateId` is passed and the project has no template.
+- `TEMPLATES_DATA_SOURCE_ID` — data source ID of the Templates database. If `TEMPLATES_DEFAULT_ID` isn't set, the oldest template with `Default?` checked is used. If neither finds a template, those projects fail with an error.
+
+### Tasks database
+
+- `TASKS_TEMPLATE_ID` — Notion page template in the same data source as TASKS_DATA_SOURCE_ID applied to each new task. `none` (default) uses no template, `default` uses the Tasks database's default template, or set a template page ID.
 
 ### Dates
 
-- `TIMEZONE` — IANA timezone (for example `America/New_York`) used to decide what "today" is and to turn date-times into calendar dates. Default: `UTC`.
+- `TIMEZONE` — IANA timezone (for example `America/New_York`) used to decide what "today" is and to turn date-times into calendar dates. Default: `UTC`. Mostly this uses no times and only does "date casting" by day, so this isn't super relevant.
 
 ### Property names
 
@@ -153,7 +159,7 @@ Projects database:
 
 Templates database:
 
-- `PROJECTS_PROPERTY_DEFAULTS` — relation from the template to its default tasks. Default: `Defaults`.
+- `TEMPLATES_PROPERTY_DEFAULTS` — relation from the template to its default tasks. Default: `Defaults`.
 - `TEMPLATES_PROPERTY_DEFAULT` — checkbox marking the fallback template. Default: `Default?`.
 
 Default tasks:
@@ -177,6 +183,6 @@ The title property is detected automatically, so it doesn't need a setting.
 
 ## Todo
 
-- [ ] Task template support
+- [x] Task template support
 - [ ] Add additional properties from shared properties
 - [ ] Copy page body from template

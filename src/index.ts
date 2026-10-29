@@ -140,11 +140,11 @@ async function createDefaultTasks(
     // Fall back to the configured default template, then the template marked as default
     templateId =
       relatedTemplates[0]?.id ||
-      process.env.DEFAULT_TASK_TEMPLATE_ID ||
+      process.env.TEMPLATES_DEFAULT_ID ||
       (await findDefaultTemplateId(notion));
     if (!templateId) {
       throw new Error(
-        `Project ${projectId} has no ${templatePropertyName}, DEFAULT_TASK_TEMPLATE_ID is not configured, and no template is marked as default`
+        `Project ${projectId} has no ${templatePropertyName}, TEMPLATES_DEFAULT_ID is not configured, and no template is marked as default`
       );
     }
   }
@@ -157,7 +157,7 @@ async function createDefaultTasks(
   }
 
   // Finally load the defaults associated with the template
-  const defaultsPropertyName = process.env.PROJECTS_PROPERTY_DEFAULTS || 'Defaults';
+  const defaultsPropertyName = process.env.TEMPLATES_PROPERTY_DEFAULTS || 'Defaults';
   const defaultsProperty = template.properties[defaultsPropertyName];
   if (defaultsProperty?.type !== 'relation') {
     throw new Error(`Template ${templateId} must have a relation property ${defaultsPropertyName}`);
