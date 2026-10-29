@@ -12,7 +12,7 @@ The worker exposes two capabilities:
 ## How it works
 
 1. Load the project page.
-2. Pick the template: the `templateId` passed to the tool, otherwise the single page in the project's `Template` relation, otherwise `DEFAULT_TASK_TEMPLATE_ID`.
+2. Pick the template: the `templateId` passed to the tool, otherwise the single page in the project's `Template` relation, otherwise `DEFAULT_TASK_TEMPLATE_ID`, otherwise the oldest template with `Default?` checked.
 3. Load every page in the template's `Defaults` relation.
 4. For each default, create a task in the Tasks data source with:
    - the default's title and icon (uploaded image icons can't be copied and are skipped),
@@ -27,7 +27,7 @@ The worker exposes two capabilities:
 - The `ntn` CLI, logged in to your workspace with `ntn login`
 - Three Notion databases:
   - **Projects** with a `Template` relation (to Templates) and a `Date` date property
-  - **Templates** with a `Defaults` relation (to the default tasks)
+  - **Templates** with a `Defaults` relation (to the default tasks) and an optional `Default?` checkbox
   - **Tasks** with a title property, a `Project` relation, an `Assignee` person property, and a `Date` date property
 
   The default tasks are expected to have a title, an `Assignee` person property, and `Date Offset` and `Date Range` number properties. All property names can be changed with environment variables (see [Options](#options)).
@@ -65,6 +65,7 @@ TIMEZONE=America/New_York
 
 ```shell
 ntn workers env set TASKS_DATA_SOURCE_ID=your-data-source-id
+ntn workers env set TEMPLATES_DATA_SOURCE_ID=your-data-source-id
 ```
 
 or push the whole `.env` file at once:
@@ -135,7 +136,8 @@ Leave off `--local` to run it on the deployed worker. The tool returns the creat
 
 ### Templates
 
-- `DEFAULT_TASK_TEMPLATE_ID` — template page to use when no `templateId` is passed and the project has no template. If it isn't set, those projects fail with an error.
+- `DEFAULT_TASK_TEMPLATE_ID` — template page to use when no `templateId` is passed and the project has no template.
+- `TEMPLATES_DATA_SOURCE_ID` — data source ID of the Templates database. If `DEFAULT_TASK_TEMPLATE_ID` isn't set, the oldest template with `Default?` checked is used. If neither finds a template, those projects fail with an error.
 - `TASKS_TEMPLATE_ID` — Notion page template applied to each new task. `none` (default) uses no template, `default` uses the Tasks database's default template, or set a template page ID.
 
 ### Dates
@@ -152,6 +154,7 @@ Projects database:
 Templates database:
 
 - `PROJECTS_PROPERTY_DEFAULTS` — relation from the template to its default tasks. Default: `Defaults`.
+- `TEMPLATES_PROPERTY_DEFAULT` — checkbox marking the fallback template. Default: `Default?`.
 
 Default tasks:
 

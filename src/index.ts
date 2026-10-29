@@ -90,6 +90,27 @@ async function createTask(
   });
 }
 
+async function findDefaultTemplateId(notion: Client): Promise<string | null> {
+  const dataSourceId = process.env.TEMPLATES_DATA_SOURCE_ID;
+  if (!dataSourceId) {
+    return null;
+  }
+
+  const defaultPropertyName = process.env.TEMPLATES_PROPERTY_DEFAULT || 'Default?';
+
+  console.log(`Looking up template checked as ${defaultPropertyName}`);
+
+  // Oldest checked template wins if more than one is marked as default
+  const { results } = await notion.dataSources.query({
+    data_source_id: dataSourceId,
+    filter: { property: defaultPropertyName, checkbox: { equals: true } },
+    sorts: [{ timestamp: 'created_time', direction: 'ascending' }],
+    page_size: 1,
+  });
+
+  return results[0]?.id ?? null;
+}
+
 type CreatedTask = { id: string; title: string; date: DateRange };
 
 async function createDefaultTasks(
@@ -116,11 +137,14 @@ async function createDefaultTasks(
       );
     }
 
-    // Fall back to the default template if the project doesn't have one
-    templateId = relatedTemplates[0]?.id ?? process.env.DEFAULT_TASK_TEMPLATE_ID;
+    // Fall back to the configured default template, then the template marked as default
+    templateId =
+      relatedTemplates[0]?.id ||
+      process.env.DEFAULT_TASK_TEMPLATE_ID ||
+      (await findDefaultTemplateId(notion));
     if (!templateId) {
       throw new Error(
-        `Project ${projectId} has no ${templatePropertyName} and DEFAULT_TASK_TEMPLATE_ID is not configured`
+        `Project ${projectId} has no ${templatePropertyName}, DEFAULT_TASK_TEMPLATE_ID is not configured, and no template is marked as default`
       );
     }
   }
