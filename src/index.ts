@@ -1,17 +1,12 @@
 import { Worker } from '@notionhq/workers';
 import { j } from '@notionhq/workers/schema-builder';
+import { Client, CreatePageResponse, isFullPage, PageIconRequest } from '@notionhq/client';
 import {
-  Client,
-  CreatePageResponse,
-  isFullPage,
-  type CreatePageParameters,
-} from '@notionhq/client';
-import {
+  type DateRange,
   getCalendarDate,
   getDateRange,
   getRelationIds,
   verifyWebhookSecret,
-  type DateRange,
 } from './utils.js';
 
 const worker = new Worker();
@@ -50,8 +45,7 @@ async function createTask(
   titleProperty: string,
   title: string,
   projectId: string,
-  // FIXME: this could be PageIconRequest if exported
-  icon: CreatePageParameters['icon'] = null,
+  icon: PageIconRequest | null = null,
   assignees: { id: string }[] = [],
   date: DateRange | null = null
 ): Promise<CreatePageResponse> {
