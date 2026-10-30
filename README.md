@@ -184,5 +184,6 @@ The title property is detected automatically, so it doesn't need a setting.
 ## Todo
 
 - [x] Task template support
+- [ ] Add tests
 - [ ] Add additional properties from shared properties
 - [ ] Copy page body from template
